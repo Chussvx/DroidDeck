@@ -1018,6 +1018,8 @@
     <string name="setup_card_components_hint">FEX, DXVK, VKD3D</string>
     <string name="setup_card_controls">Controls</string>
     <string name="setup_card_controls_hint">Button mapping</string>
+    <string name="game_input_profile">Controller profile</string>
+    <string name="game_input_profile_note">Switches to this profile when the game starts from DroidDeck.</string>
     <string name="store_tab_discover">Discover</string>
     <string name="store_tab_search">Search</string>
     <string name="store_tab_installed">Installed</string>

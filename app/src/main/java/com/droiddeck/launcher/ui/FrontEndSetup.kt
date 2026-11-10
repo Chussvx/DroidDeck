@@ -762,6 +762,7 @@ internal fun LaunchSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost
             }
         }
         if (controller != null) add { m -> SettingCard(stringResource(R.string.setup_card_controls), stringResource(R.string.setup_card_controls_hint), "card:controls", m, controller.onMapping) }
+        if (game != null && steamScope != null) add { m -> Box(m) { GameInputProfileCard(host, steamScope) } }
         if (steamCard != null) add(steamCard)
         val cardStore = com.droiddeck.launcher.stores.Store.byId(game?.source.orEmpty())?.takeIf { it == com.droiddeck.launcher.stores.Store.EPIC || it == com.droiddeck.launcher.stores.Store.GOG }
         if (cardStore != null && game?.gameFiles != null) add { m ->
@@ -790,6 +791,30 @@ internal fun LaunchSettings(s: FrontEndState, a: FrontEndActions, host: MenuHost
                 repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
+    }
+}
+
+@Composable
+private fun GameInputProfileCard(host: MenuHost, scope: String) {
+    val context = LocalContext.current
+    val key = "game-input-profile"
+    val library = remember(host.open) { runCatching { com.droiddeck.launcher.input.InputLibraries.read(context) }.getOrNull() }
+    var chosen by remember(scope) { mutableStateOf(com.droiddeck.launcher.input.GameInputProfiles.get(context, scope)) }
+    val profiles = library?.profiles.orEmpty()
+    val auto = stringResource(R.string.input_quick_auto, library?.let { l -> l.profiles.firstOrNull { it.id == l.steam }?.name }.orEmpty())
+    val name = chosen?.let { id -> profiles.firstOrNull { it.id == id }?.name } ?: auto
+    fun pick(id: String?) {
+        com.droiddeck.launcher.input.GameInputProfiles.set(context, scope, id)
+        chosen = id
+        host.open = null
+    }
+    SettingCard(stringResource(R.string.game_input_profile), name, "card:$key", Modifier.fillMaxSize()) {
+        host.open = if (host.open == key) null else key
+    }
+    AnchoredMenu(host.open == key, onDismiss = { if (host.open == key) host.open = null }, title = stringResource(R.string.game_input_profile),
+        note = stringResource(R.string.game_input_profile_note)) { first ->
+        MenuItem(auto, checked = chosen == null, focusRequester = first) { pick(null) }
+        profiles.forEach { p -> MenuItem(p.name, checked = chosen == p.id) { pick(p.id) } }
     }
 }
 
