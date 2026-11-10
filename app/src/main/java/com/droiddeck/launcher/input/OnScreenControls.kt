@@ -140,6 +140,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
         private val density = resources.displayMetrics.density
         private var armed = false
         private var moving = false
+        private val timer = android.os.Handler(android.os.Looper.getMainLooper())
         private var downRawX = 0f
         private var downRawY = 0f
         private var startX = 0f
@@ -183,7 +184,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
                     moving = false
                     downRawX = event.rawX
                     downRawY = event.rawY
-                    postDelayed(startMove, QUICK_MOVE_HOLD_MS)
+                    timer.postDelayed(startMove, QUICK_MOVE_HOLD_MS)
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - downRawX
@@ -191,7 +192,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
                     if (moving) moveTo(startX + dx, startY + dy)
                     else if (armed && dx * dx + dy * dy > (QUICK_SLOP_DP * density).let { it * it }) {
                         armed = false
-                        removeCallbacks(startMove)
+                        timer.removeCallbacks(startMove)
                     }
                 }
                 MotionEvent.ACTION_CANCEL -> finish(false)
@@ -207,7 +208,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
         }
 
         private fun finish(save: Boolean) {
-            removeCallbacks(startMove)
+            timer.removeCallbacks(startMove)
             armed = false
             if (moving) {
                 moving = false
@@ -237,7 +238,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
         }
 
         fun restorePosition() {
-            post {
+            timer.post {
                 val parent = this@OnScreenControls
                 if (parent.width <= 0 || parent.height <= 0 || width <= 0 || moving) return@post
                 val p = prefs()
