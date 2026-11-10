@@ -1,0 +1,58 @@
+name: Side-by-side APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Build APK run whose droiddeck-apk artifact to repackage
+        required: true
+      package:
+        description: Android package name for the side-by-side install
+        default: com.droiddeck.launcher.test
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  repackage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: droiddeck-apk
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          path: in
+      - name: Rename, align and sign with the testkey
+        env:
+          PKG: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          P=com.droiddeck.launcher
+          apk=$(ls in/*.apk | head -1)
+          python3 tools/release/axml_rename.py "$apk" renamed.apk \
+            "$P=$PKG" "$P.androidx-startup=$PKG.androidx-startup" "$P.logs=$PKG.logs" \
+            "$P.pairingguide=$PKG.pairingguide" "$P.pin=$PKG.pin" \
+            "$P.documents=$PKG.documents" "$P.home=$PKG.home" "$P.agent=$PKG.agent" \
+            "$P.vr_recovery=$PKG.vr_recovery" "$P.dualscreen=$PKG.dualscreen" "$P.typing=$PKG.typing" \
+            "$P.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION=$PKG.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+          got=$("$BT/aapt" dump badging renamed.apk | sed -n "s/^package: name='\([^']*\)'.*/\1/p")
+          test "$got" = "$PKG"
+          "$BT/zipalign" -p -f 4 renamed.apk aligned.apk
+          mkdir -p out
+          "$BT/apksigner" sign --ks keystore/testkey.p12 --ks-type PKCS12 --ks-pass pass:android \
+            --ks-key-alias testkey --key-pass pass:android \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --v4-signing-enabled false \
+            --out out/DroidDeck-test.apk aligned.apk
+          "$BT/apksigner" verify --print-certs out/DroidDeck-test.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: droiddeck-test-apk
+          path: out/DroidDeck-test.apk
+          compression-level: 0
