@@ -227,6 +227,42 @@ class OnScreenControlsTest {
         assertFalse(view.hasPinned)
     }
 
+    @Test fun holdingTheQuickToggleMovesItAndATapStillToggles() {
+        val toggle = (0 until view.childCount).map(view::getChildAt).first { it !is com.droiddeck.launcher.ui.InputSurfaceView }
+        val cx = toggle.left + toggle.width / 2f
+        val cy = toggle.top + toggle.height / 2f
+        quick(toggle, MotionEvent.ACTION_DOWN, cx, cy)
+        quick(toggle, MotionEvent.ACTION_UP, cx, cy)
+        assertTrue(view.isQuickHidden)
+        quick(toggle, MotionEvent.ACTION_DOWN, cx, cy)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper(3_100, java.util.concurrent.TimeUnit.MILLISECONDS)
+        quick(toggle, MotionEvent.ACTION_MOVE, cx + 300f, cy - 200f)
+        quick(toggle, MotionEvent.ACTION_UP, cx + 300f, cy - 200f)
+        assertTrue(view.isQuickHidden)
+        assertEquals(300f, toggle.translationX, 1f)
+        assertEquals(-200f, toggle.translationY, 1f)
+        assertTrue(view.takesTouchAt(cx + 300f, cy - 200f))
+        assertFalse(view.takesTouchAt(cx, cy))
+    }
+
+    @Test fun aShortDragOnTheQuickToggleDoesNotMoveOrToggleIt() {
+        val toggle = (0 until view.childCount).map(view::getChildAt).first { it !is com.droiddeck.launcher.ui.InputSurfaceView }
+        val cx = toggle.left + toggle.width / 2f
+        val cy = toggle.top + toggle.height / 2f
+        quick(toggle, MotionEvent.ACTION_DOWN, cx, cy)
+        quick(toggle, MotionEvent.ACTION_MOVE, cx + 200f, cy)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper(3_100, java.util.concurrent.TimeUnit.MILLISECONDS)
+        quick(toggle, MotionEvent.ACTION_UP, cx + 200f, cy)
+        assertFalse(view.isQuickHidden)
+        assertEquals(0f, toggle.translationX, 0f)
+    }
+
+    private fun quick(target: View, action: Int, rawX: Float, rawY: Float) {
+        val event = MotionEvent.obtain(1000L, time++, action, rawX - target.left, rawY - target.top, 0)
+        event.setLocation(rawX - target.left, rawY - target.top)
+        try { target.dispatchTouchEvent(event) } finally { event.recycle() }
+    }
+
     private companion object { const val ASPECT = 1000f / 600f }
 
     private fun touch(action: Int, vararg pointers: Pair<Int, Pair<Float, Float>>, flags: Int = 0): Boolean {

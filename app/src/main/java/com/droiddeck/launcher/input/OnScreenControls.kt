@@ -95,8 +95,9 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
         quickToggle.invalidate()
     }
 
-    fun takesTouchAt(x: Float, y: Float) = surface.takesTouchAt(x, y) ||
-        quickToggle.visibility == VISIBLE && x >= quickToggle.left && x < quickToggle.right && y >= quickToggle.top && y < quickToggle.bottom
+    fun takesTouchAt(x: Float, y: Float) = surface.takesTouchAt(x, y) || quickToggle.visibility == VISIBLE &&
+        x >= quickToggle.left + quickToggle.translationX && x < quickToggle.right + quickToggle.translationX &&
+        y >= quickToggle.top + quickToggle.translationY && y < quickToggle.bottom + quickToggle.translationY
     fun releaseAll() = surface.releaseInputs()
     fun reload() { releaseAll(); placements.clear(); render() }
 
@@ -107,6 +108,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
             viewWidth = w
             viewHeight = h
             render()
+            quickToggle.restorePosition()
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     }
@@ -124,6 +126,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
             params.bottomMargin = bottom
             quickToggle.layoutParams = params
         }
+        quickToggle.restorePosition()
         val fresh = Rect(cutout?.safeInsetLeft ?: 0, if (dock == null) cutout?.safeInsetTop ?: 0 else 0, cutout?.safeInsetRight ?: 0, cutout?.safeInsetBottom ?: 0)
         if (fresh != safe) {
             safe.set(fresh)
@@ -136,6 +139,20 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
         var tint: Int? = ControllerPrefs.STEAM_BLUE
         private val density = resources.displayMetrics.density
         private var armed = false
+        private var moving = false
+        private var downRawX = 0f
+        private var downRawY = 0f
+        private var startX = 0f
+        private var startY = 0f
+        private val startMove = Runnable {
+            if (!armed) return@Runnable
+            armed = false
+            moving = true
+            startX = translationX
+            startY = translationY
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+            invalidate()
+        }
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
         private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * density }
         private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -153,6 +170,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
             canvas.drawCircle(x, y, radius, fill)
             stroke.color = if (color != null) InputSurfaceView.light(color, 150, 0.25f) else InputSurfaceView.LINE
             canvas.drawCircle(x, y, radius, stroke)
+            if (moving) canvas.drawCircle(x, y, radius + 4 * density, stroke)
             text.color = if (color != null) InputSurfaceView.light(color, 210, 0.75f) else InputSurfaceView.TEXT
             canvas.drawText(if (isQuickHidden) "+" else "−", x, y + text.textSize * 0.35f, text)
         }
@@ -160,17 +178,78 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouchEvent(event: MotionEvent): Boolean {
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> armed = true
-                MotionEvent.ACTION_CANCEL -> armed = false
+                MotionEvent.ACTION_DOWN -> {
+                    armed = true
+                    moving = false
+                    downRawX = event.rawX
+                    downRawY = event.rawY
+                    postDelayed(startMove, QUICK_MOVE_HOLD_MS)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - downRawX
+                    val dy = event.rawY - downRawY
+                    if (moving) moveTo(startX + dx, startY + dy)
+                    else if (armed && dx * dx + dy * dy > (QUICK_SLOP_DP * density).let { it * it }) {
+                        armed = false
+                        removeCallbacks(startMove)
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> finish(false)
                 MotionEvent.ACTION_UP -> {
-                    if (armed && event.x in 0f..width.toFloat() && event.y in 0f..height.toFloat()) {
+                    if (!moving && armed && event.x in 0f..width.toFloat() && event.y in 0f..height.toFloat()) {
                         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                         setQuickHidden(!isQuickHidden)
                     }
-                    armed = false
+                    finish(moving)
                 }
             }
             return true
+        }
+
+        private fun finish(save: Boolean) {
+            removeCallbacks(startMove)
+            armed = false
+            if (moving) {
+                moving = false
+                invalidate()
+                if (save) savePosition()
+            }
+        }
+
+        private fun moveTo(x: Float, y: Float) {
+            val parent = this@OnScreenControls
+            if (parent.width <= 0 || parent.height <= 0 || width <= 0) return
+            translationX = x.coerceIn(-left.toFloat(), (parent.width - right).toFloat())
+            translationY = y.coerceIn(-top.toFloat(), (parent.height - bottom).toFloat())
+        }
+
+        private fun prefs() = context.getSharedPreferences("controller", Context.MODE_PRIVATE)
+
+        private fun key() = "quickToggle.${this@OnScreenControls.width}x${this@OnScreenControls.height}"
+
+        private fun savePosition() {
+            val parent = this@OnScreenControls
+            if (parent.width <= 0 || parent.height <= 0) return
+            prefs().edit()
+                .putFloat(key() + ".x", (left + translationX + width / 2f) / parent.width)
+                .putFloat(key() + ".y", (top + translationY + height / 2f) / parent.height)
+                .apply()
+        }
+
+        fun restorePosition() {
+            post {
+                val parent = this@OnScreenControls
+                if (parent.width <= 0 || parent.height <= 0 || width <= 0 || moving) return@post
+                val p = prefs()
+                val fx = p.getFloat(key() + ".x", -1f)
+                val fy = p.getFloat(key() + ".y", -1f)
+                if (fx < 0f || fy < 0f) {
+                    translationX = 0f
+                    translationY = 0f
+                    return@post
+                }
+                moveTo(fx * parent.width - left - width / 2f, fy * parent.height - top - height / 2f)
+            }
         }
     }
 
@@ -179,5 +258,7 @@ class OnScreenControls(context: Context, pad: PadBridge?, val dock: OnScreenLayo
         const val QUICK_HIT_DP = 26f
         const val QUICK_RADIUS_DP = 18f
         const val PLACEMENT_CACHE = 4
+        const val QUICK_MOVE_HOLD_MS = 3_000L
+        const val QUICK_SLOP_DP = 12f
     }
 }
